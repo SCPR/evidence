@@ -1,0 +1,25 @@
+version: '3'
+services:
+  evidence-ftp:
+    image: stilliard/pure-ftpd
+    volumes:
+      - evidence-ftp-data:/home/ftpusers
+      - evidence-ftp-etc:/etc/pureftpd
+    hostname: evidence-ftp
+    stdin_open: true
+    tty: true
+    ports:
+      - 21:21/tcp
+      - 30000-30009:30000-30009/tcp
+volumes:
+  evidence-ftp-data:
+  evidence-ftp-etc:
+
+# then exec the container
+#
+# docker-compose exec evidence-ftp /bin/bash
+#
+# and run this
+#
+# pure-pw useradd bob -f /etc/pure-ftpd/passwd/pureftpd.passwd -m -u ftpuser -d /home/ftpusers/bob
+
