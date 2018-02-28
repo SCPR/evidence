@@ -138,7 +138,9 @@ exports.handler = (event, context, callback) => {
       return ftp.ready()
         .then(() => {
           return Promise.all(queries.map(query => {
-            return ftp.put(query.filename, query.csv);
+            return ftp.put(
+              [process.env.EVIDENCE_FTP_DIRECTORY, query.filename].filter(x => x).join('/'), query.csv
+            );
           }));
         });
     })
