@@ -6,13 +6,14 @@ const braintree  = require('braintree'),
       fs         = require('fs'),
       get        = require('dot-prop').get,
       moment     = require('moment'),
-      FTP        = require('./lib/ftp')
-      Promise    = require('bluebird');
+      FTP        = require('./lib/ftp'),
+      Promise    = require('bluebird'),
+      CSV        = require('csv-string');
                    require('moment-timezone');
                    
 
 let gateway      = braintree.connect({
-  environment: braintree.Environment.Sandbox,
+  environment: process.env.EVIDENCE_ENV === 'production' ? braintree.Environment.Production : braintree.Environment.Sandbox,
   merchantId:  process.env.BRAINTREE_MERCHANT_ID,
   publicKey:   process.env.BRAINTREE_PUBLIC_KEY,
   privateKey:  process.env.BRAINTREE_PRIVATE_KEY
@@ -32,8 +33,10 @@ exports.handler = (event, context, callback) => {
       endOfMonth       = moment().endOf('month').format('MM/DD/YYYY hh:mm'),
       stamp            = moment().format('YYYYMM'),
       successStatuses  = ['settled'],
+      // There are multiple ways in which a transaction can be considered a failure.
       failedStatuses   = ['settlement_declined', 'gateway_rejected', 'failed', 'processor_declined', 'voided'];
 
+  // These are "query" objects that we pass along, with which we will query Braintree and write files.
   let queries = [
     {
       filename: `${stamp}_SCPR-Apple-Pay_Successful.csv`,
@@ -56,6 +59,7 @@ exports.handler = (event, context, callback) => {
       statuses: failedStatuses
     }
   ].map(q => {
+      // Wrap them in promisified queries.
       return new Promise((resolve, reject) => {
         let stream = gateway.transaction.search(query => {
           query.createdAt().between(beginningOfMonth, endOfMonth);
@@ -72,6 +76,7 @@ exports.handler = (event, context, callback) => {
       });
     });
 
+  // Wait for each query to be fulfilled and then we'll convert the returned data to CSV format.
   Promise.all(queries)
     .then(queries => {
       return queries.map(query => {
@@ -122,10 +127,9 @@ exports.handler = (event, context, callback) => {
             card.expirationMonth,
             card.expirationYear,
             (transaction.paymentInstrumentType || '').replace(/_card$/, '')
-          ];
-        }))
-        .map(line => line.join(','))
-        .join('\n');
+          ].map(l => typeof l === 'string' ? l.replace(/[\n|\r]/g, ', ') : l);
+        }));
+        query.csv = CSV.stringify(query.csv);
         return query;
       });
     })
@@ -137,12 +141,14 @@ exports.handler = (event, context, callback) => {
       });
       return ftp.ready()
         .then(() => {
+          // Send each of them off to an FTP server.
           return Promise.all(queries.map(query => {
             return ftp.put(
               [process.env.EVIDENCE_FTP_DIRECTORY, query.filename].filter(x => x).join('/'), query.csv
             );
           }));
-        });
+        })
+        .then(() => ftp.end());
     })
     .then(() => {
       done(null, 'complete');
